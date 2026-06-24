@@ -8,19 +8,6 @@ echo    TrueSpot Dashboard - Starting up...
 echo  =========================================
 echo.
 
-:: Check Node.js is installed
-where node > nul 2>&1
-if %errorlevel% neq 0 (
-    echo  ERROR: Node.js is not installed.
-    echo.
-    echo  Please download and install Node.js from:
-    echo  https://nodejs.org  (choose the LTS version)
-    echo.
-    echo  After installing, double-click this file again.
-    pause
-    exit /b 1
-)
-
 :: Run npm install if node_modules is missing (first time setup)
 if not exist "node_modules\" (
     echo  First-time setup: installing dependencies...
