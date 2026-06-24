@@ -1,0 +1,33 @@
+{
+  "client_id": "carvision",
+  "display_name": "CarVision",
+  "locations": [],
+  "dashboards": {
+    "locationhistory": {
+      "label": "Location History",
+      "dataset_name": "CarVision",
+      "panels": [
+        {
+          "id": "last-refresh",
+          "title": "Last Refresh",
+          "type": "kpi_card",
+          "measure": "[Last Refresh]"
+        },
+        {
+          "id": "location-history-data",
+          "title": "Locations Visited",
+          "type": "data_table",
+          "filter_columns": {
+            "geofence":    "AppendFinal[Geofence]",
+            "subGeoZone":  "AppendFinal[SubGeoZone]",
+            "floorLevel":  "AppendFinal[Floor Level]",
+            "beaconId":    "AppendFinal[BeaconId]",
+            "vin":         "AppendFinal[VIN Updated]",
+            "stockNumber": "AppendFinal[StockNumber]",
+            "assetType":   "AppendFinal[AssetType]"
+          }
+        }
+      ]
+    }
+  }
+}

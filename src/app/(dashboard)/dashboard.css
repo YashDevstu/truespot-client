@@ -1,0 +1,5 @@
+.dashboard-shell {
+  min-height: 100vh;
+  background-color: #f1f5f9;
+  /* padding is handled inside each dashboard component */
+}
