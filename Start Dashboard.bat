@@ -16,8 +16,8 @@ if %errorlevel% == 0 (
     goto :done
 )
 
-:: Start the Next.js server in a separate minimized window
-start "TrueSpot Server" /min cmd /c "npm run dev"
+:: Start the Next.js server on a fixed port in a separate minimized window
+start "TrueSpot Server" /min cmd /c "set PORT=3001 && npm run dev"
 
 echo  Waiting for server to be ready...
 
