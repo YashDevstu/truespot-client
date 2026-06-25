@@ -15,20 +15,6 @@ import DirectionsCarOutlinedIcon from '@mui/icons-material/DirectionsCarOutlined
 import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined'
 import type { LocationHistoryFilters } from '@/hooks/useFilters'
 
-function buildDateLabels(): string[] {
-  const labels = ['Today']
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date()
-    d.setDate(d.getDate() - i)
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
-    const dd = String(d.getDate()).padStart(2, '0')
-    const yy = String(d.getFullYear()).slice(-2)
-    labels.push(`${mm}/${dd}/${yy}`)
-  }
-  return labels
-}
-
-const DATE_LABELS = buildDateLabels()
 
 export interface FilterOptions {
   geofence: string[]
@@ -160,15 +146,6 @@ export default function FilterSidebar({
       {/* Scrollable filter list */}
       <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1.5 }}>
         <Stack spacing={1.5}>
-
-          {/* Date Seen — multi-select; empty = All Dates */}
-          <MultiFilter
-            label="Date Seen"
-            options={DATE_LABELS}
-            value={toArray(filters.dateSeen)}
-            onChange={(vals) => onFilterChange('dateSeen', vals.join(','))}
-            placeholder="All dates (8 days)"
-          />
 
           {/* Asset Type — both options can be active simultaneously */}
           <Box>

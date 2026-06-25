@@ -7,6 +7,20 @@ import Paper from '@mui/material/Paper'
 import TimelineIcon from '@mui/icons-material/Timeline'
 import { parsePings, mergeConsecutiveStops, type MergedStop } from '@/utils/stops'
 
+// Vehicle dot colors — same palette as SelectedAssetCard so colors stay consistent
+const DOT_COLORS = [
+  '#4285F4', '#9C27B0', '#4CAF50', '#FF5722',
+  '#00BCD4', '#FF9800', '#E91E63', '#607D8B',
+]
+
+interface VehicleGroup {
+  key: string
+  label: string
+  color: string
+  blocks: MergedStop[]
+  totalMinutes: number
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 function fmtTime(ms: number): string {
   const d = new Date(ms)
@@ -171,13 +185,14 @@ export default function JourneyTimeline({
   selectedIndex,
   onSelectIndex,
 }: JourneyTimelineProps) {
-  const { pings, allBlocks, uniqueGeofences, minMs, maxMs, timeTicks, isMultiDay, dayGroups } =
+  const { pings, allBlocks, uniqueGeofences, minMs, maxMs, timeTicks, isMultiDay, dayGroups, vehicleGroups, isMultiVehicle } =
     useMemo(() => {
       const pings = parsePings(rows)
       if (pings.length === 0) {
         return {
           pings: [], allBlocks: [], uniqueGeofences: [],
           minMs: 0, maxMs: 0, timeTicks: [], isMultiDay: false, dayGroups: [],
+          vehicleGroups: [], isMultiVehicle: false,
         }
       }
 
@@ -186,6 +201,36 @@ export default function JourneyTimeline({
       const maxMs           = pings.reduce((m, p) => Math.max(m, p.endMs), pings[0].endMs)
       const isMultiDay      = (maxMs - minMs) > 26 * 3_600_000
       const uniqueGeofences = [...new Set(allBlocks.map((b) => b.geofence))].filter(Boolean)
+
+      // Build per-vehicle groups for single-day multi-vehicle mode
+      let vehicleGroups: VehicleGroup[] = []
+      if (!isMultiDay) {
+        const vMap = new Map<string, { vRows: Record<string, unknown>[]; label: string; color: string }>()
+        let colorIdx = 0
+        for (const row of rows) {
+          const vin    = String(row['[VIN]']         ?? '').trim()
+          const stock  = String(row['[StockNumber]'] ?? '').trim()
+          const beacon = String(row['[BeaconId]']    ?? '').trim()
+          const key    = vin || stock || beacon
+          if (!key) continue
+          if (!vMap.has(key)) {
+            const model  = String(row['[Model]'] ?? '').trim()
+            const year   = String(row['[Year]']  ?? '').trim()
+            const shortY = year ? `'${year.slice(-2)}` : ''
+            const label  = [model, shortY].filter(Boolean).join(' ') || vin || stock || beacon
+            vMap.set(key, { vRows: [], label, color: DOT_COLORS[colorIdx++ % DOT_COLORS.length] })
+          }
+          vMap.get(key)!.vRows.push(row)
+        }
+        if (vMap.size > 1) {
+          vehicleGroups = [...vMap.entries()].map(([key, { vRows, label, color }]) => {
+            const vpings       = parsePings(vRows)
+            const blocks       = mergeConsecutiveStops(vpings)
+            const totalMinutes = mergedIntervalMinutes(vpings)
+            return { key, label, color, blocks, totalMinutes }
+          })
+        }
+      }
 
       return {
         pings,
@@ -196,6 +241,8 @@ export default function JourneyTimeline({
         timeTicks: isMultiDay ? [] : buildTimeTicks(minMs, maxMs),
         isMultiDay,
         dayGroups: isMultiDay ? buildDayGroups(pings, minMs, maxMs) : [],
+        vehicleGroups,
+        isMultiVehicle: vehicleGroups.length > 1,
       }
     }, [rows])
 
@@ -250,7 +297,7 @@ export default function JourneyTimeline({
         >
           {dateLabel}
         </Typography>
-        {!isMultiDay && (
+        {!isMultiDay && !isMultiVehicle && (
           <>
             <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'text.disabled', flexShrink: 0 }} />
             <Typography variant="caption" color="text.disabled">click a segment to select</Typography>
@@ -258,7 +305,10 @@ export default function JourneyTimeline({
         )}
         <Box sx={{ flex: 1 }} />
         <Typography variant="caption" color="text.disabled">
-          {allBlocks.length} stop{allBlocks.length !== 1 ? 's' : ''} · {uniqueGeofences.length} geofence{uniqueGeofences.length !== 1 ? 's' : ''}
+          {isMultiVehicle
+            ? `${allBlocks.length} stop${allBlocks.length !== 1 ? 's' : ''} · ${vehicleGroups.length} vehicles`
+            : `${allBlocks.length} stop${allBlocks.length !== 1 ? 's' : ''} · ${uniqueGeofences.length} geofence${uniqueGeofences.length !== 1 ? 's' : ''}`
+          }
         </Typography>
       </Box>
 
@@ -438,6 +488,121 @@ export default function JourneyTimeline({
             <Box sx={{ width: 60, flexShrink: 0 }} />
           </Box>
         </Box>
+      ) : isMultiVehicle ? (
+        /* ── Multi-vehicle: one row per vehicle ──────────────────────────── */
+        <>
+          {vehicleGroups.map((vg) => (
+            <Box key={vg.key} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+              {/* Vehicle label */}
+              <Box sx={{ width: 80, flexShrink: 0, textAlign: 'right' }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 700, color: vg.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {vg.label}
+                </Typography>
+              </Box>
+
+              {/* Timeline bar */}
+              <Box
+                sx={{
+                  flex: 1,
+                  position: 'relative',
+                  height: 40,
+                  borderRadius: 1.5,
+                  overflow: 'hidden',
+                  bgcolor: 'grey.100',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                }}
+              >
+                {vg.blocks.length === 0 ? (
+                  <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: 10 }}>No activity</Typography>
+                  </Box>
+                ) : (
+                  vg.blocks.map((block, bi) => {
+                    const color  = colorMap.get(block.geofence) ?? '#9E9E9E'
+                    const isLast = bi === vg.blocks.length - 1
+                    return (
+                      <Tooltip key={bi} arrow placement="top" title={blockTooltip(block)}>
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            left:   toLeft(block.startMs),
+                            width:  toWidth(block.startMs, block.endMs),
+                            top: 0,
+                            bottom: 0,
+                            bgcolor: color,
+                            borderRight: isLast ? 'none' : '2px solid rgba(255,255,255,0.7)',
+                            transition: 'filter 0.15s',
+                            cursor: 'default',
+                            display: 'flex',
+                            alignItems: 'center',
+                            overflow: 'hidden',
+                            px: 0.75,
+                            '&:hover': { filter: 'brightness(0.85)', zIndex: 1 },
+                          }}
+                        >
+                          {block.totalMinutes >= 30 && (
+                            <Typography sx={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              color: 'rgba(255,255,255,0.92)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              textShadow: '0 1px 2px rgba(0,0,0,0.25)',
+                              pointerEvents: 'none',
+                              userSelect: 'none',
+                            }}>
+                              {fmtDuration(block.totalMinutes)}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Tooltip>
+                    )
+                  })
+                )}
+              </Box>
+
+              {/* Total duration */}
+              <Box sx={{ width: 50, flexShrink: 0, textAlign: 'right' }}>
+                <Typography sx={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums',
+                  color: vg.totalMinutes >= 4 * 60 ? 'text.primary' : 'text.secondary',
+                }}>
+                  {fmtDuration(vg.totalMinutes)}
+                </Typography>
+              </Box>
+            </Box>
+          ))}
+
+          {/* Shared x-axis */}
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mt: 0.5 }}>
+            <Box sx={{ width: 80, flexShrink: 0 }} />
+            <Box sx={{ flex: 1, position: 'relative', height: 22 }}>
+              {timeTicks.map((tick, i) => (
+                <Box
+                  key={i}
+                  sx={{
+                    position: 'absolute',
+                    left: `${tick.pct}%`,
+                    transform: tick.isFirst ? 'none' : tick.isLast ? 'translateX(-100%)' : 'translateX(-50%)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: tick.isFirst ? 'flex-start' : tick.isLast ? 'flex-end' : 'center',
+                  }}
+                >
+                  <Box sx={{ width: 1, height: 4, bgcolor: 'divider', mb: 0.25 }} />
+                  <Typography variant="caption" sx={{ fontSize: 10, color: 'text.disabled', whiteSpace: 'nowrap', userSelect: 'none' }}>
+                    {tick.label}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+            <Box sx={{ width: 50, flexShrink: 0 }} />
+          </Box>
+        </>
       ) : (
         /* ── Single-day: existing bar layout ─────────────────────────────── */
         <>

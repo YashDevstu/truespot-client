@@ -7,6 +7,9 @@ import LinearProgress from '@mui/material/LinearProgress'
 import Alert from '@mui/material/Alert'
 import Paper from '@mui/material/Paper'
 import TimelineIcon from '@mui/icons-material/Timeline'
+import Button from '@mui/material/Button'
+import Autocomplete from '@mui/material/Autocomplete'
+import TextField from '@mui/material/TextField'
 import { useFilters } from '@/hooks/useFilters'
 import { usePanelQuery } from '@/hooks/usePanelQuery'
 import { useProgressiveDatesQuery } from '@/hooks/useProgressiveDatesQuery'
@@ -20,6 +23,31 @@ import JourneyTimeline from './panels/JourneyTimeline/JourneyTimeline'
 import AssetStatCards from './panels/AssetStatCards'
 import LocationsVisitedTable from './panels/LocationsVisitedTable'
 import SelectedAssetCard from './SelectedAssetCard'
+
+// Parse "M/D/YY …" from the last-refresh string to get the data's anchor date.
+function parseLastRefreshDate(s: string | undefined): Date | undefined {
+  if (!s) return undefined
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})/)
+  if (!m) return undefined
+  const d = new Date(2000 + parseInt(m[3], 10), parseInt(m[1], 10) - 1, parseInt(m[2], 10))
+  return isNaN(d.getTime()) ? undefined : d
+}
+
+// Build 8 date labels anchored to the data's "today" (last refresh date).
+// Falls back to actual today if the anchor is unavailable.
+function buildDateLabels(anchor?: Date): string[] {
+  const base = anchor ?? new Date()
+  const labels = ['Today']
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(base)
+    d.setDate(d.getDate() - i)
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const yy = String(d.getFullYear()).slice(-2)
+    labels.push(`${mm}/${dd}/${yy}`)
+  }
+  return labels
+}
 
 interface Props {
   clientId: string
@@ -41,6 +69,7 @@ export default function LocationHistoryDashboard({
   const { filters, setFilter, resetFilters } = useFilters()
   const [refreshToken, setRefreshToken] = useState(0)
   const [selectedStopIndex, setSelectedStopIndex] = useState<number | null>(null)
+  const [customOpen, setCustomOpen] = useState(false)
 
   // Parse comma-separated date selection; empty / 'all' = show all 8 dates
   const selectedDates: string[] | null = (() => {
@@ -203,6 +232,27 @@ export default function LocationHistoryDashboard({
   // Show Live badge when Today's data is included
   const showLive = isAllDates || (selectedDates?.includes('Today') ?? false)
 
+  // Anchor date labels to the last refresh date so "Yesterday" and the custom
+  // range options align with what's actually in the data.
+  const DATE_LABELS = useMemo(
+    () => buildDateLabels(parseLastRefreshDate(lastRefreshValue)),
+    [lastRefreshValue],
+  )
+  const YESTERDAY_LABEL = DATE_LABELS[1]
+
+  // Date preset buttons
+  const toDateArr = (v: string) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : [])
+  const activePreset: 'today' | 'yesterday' | 'last7' | 'custom' = (() => {
+    const ds = filters.dateSeen
+    if (!ds || ds === 'all') return 'last7'
+    if (ds === 'Today') return 'today'
+    if (ds === YESTERDAY_LABEL) return 'yesterday'
+    return 'custom'
+  })()
+  const showCustomPicker = activePreset === 'custom' || customOpen
+  const effectivePreset = showCustomPicker ? 'custom' : activePreset
+  const customDates = toDateArr(filters.dateSeen).filter((d) => DATE_LABELS.includes(d))
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', alignItems: 'flex-start' }}>
       {/* ── Left sidebar ───────────────────────────────────────────────────── */}
@@ -239,6 +289,53 @@ export default function LocationHistoryDashboard({
             onExportExcel={handleExportExcel}
             exportDisabled={tableLoading && tableRows.length === 0}
           />
+
+          {/* Date preset buttons */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            {(
+              [
+                { value: 'today',     label: 'Today' },
+                { value: 'yesterday', label: 'Yesterday' },
+                { value: 'last7',     label: 'Last 7 days' },
+                { value: 'custom',    label: 'Custom range' },
+              ] as const
+            ).map(({ value, label }) => (
+              <Button
+                key={value}
+                variant={effectivePreset === value ? 'contained' : 'outlined'}
+                size="small"
+                disableElevation
+                onClick={() => {
+                  if (value === 'custom') {
+                    setCustomOpen(true)
+                  } else {
+                    setCustomOpen(false)
+                    setFilter(
+                      'dateSeen',
+                      value === 'today' ? 'Today' : value === 'yesterday' ? YESTERDAY_LABEL : 'all',
+                    )
+                  }
+                }}
+                sx={{ textTransform: 'none', borderRadius: '20px', px: 2.5, py: 0.5, fontSize: 13 }}
+              >
+                {label}
+              </Button>
+            ))}
+
+            {showCustomPicker && (
+              <Autocomplete<string, true, false, false>
+                multiple
+                size="small"
+                options={DATE_LABELS}
+                value={customDates}
+                onChange={(_, vals) => setFilter('dateSeen', vals.join(','))}
+                limitTags={2}
+                disableCloseOnSelect
+                sx={{ minWidth: 240 }}
+                renderInput={(params) => <TextField {...params} label="Select dates" size="small" />}
+              />
+            )}
+          </Box>
 
           {/* ── Asset selected: stat cards + timeline + locations table ─── */}
           {selectedAsset ? (
