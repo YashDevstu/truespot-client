@@ -66,9 +66,15 @@ interface Stop {
   make: string
   model: string
   year: string
+  vin: string
+  beaconId: string
   startMs: number
   endMs: number
   minutes: number
+}
+
+function vehicleKey(s: Stop): string {
+  return s.vin || s.beaconId || `${s.make}${s.model}${s.year}`
 }
 
 function AssetIcon({ assetType }: { assetType: string }) {
@@ -139,7 +145,7 @@ export default function LocationsVisitedTable({
   const [sortMode, setSortMode] = useState<SortMode>(showLive ? 'live' : 'oldest')
   const [collapsed, setCollapsed] = useState(false)
 
-  const { stops, liveStop } = useMemo(() => {
+  const { stops, liveStop, livePerVehicle, isMultiVehicle } = useMemo(() => {
     const parsed = rows
       .map((r) => {
         const startMs = parseMs(r['[StartTime]'])
@@ -153,6 +159,8 @@ export default function LocationsVisitedTable({
           make:       String(r['[Make]']        ?? ''),
           model:      String(r['[Model]']       ?? ''),
           year:       String(r['[Year]']        ?? ''),
+          vin:        String(r['[VIN]']         ?? '').trim(),
+          beaconId:   String(r['[BeaconId]']    ?? '').trim(),
           startMs,
           endMs,
           minutes: Number(r['[MinutesDiff]'] ?? 0),
@@ -160,29 +168,47 @@ export default function LocationsVisitedTable({
       })
       .filter((s): s is Stop => s !== null)
 
-    // The live stop is always the chronologically most recent, regardless of display order
+    // Count distinct vehicles
+    const vehicleKeySet = new Set(parsed.map(vehicleKey))
+    const isMultiVehicle = vehicleKeySet.size > 1
+
+    // Per-vehicle live detection: find the most recent stop for each vehicle.
+    // This way every vehicle shows its own current location as "live", not just
+    // the globally most recent ping.
+    const livePerVehicle = new Map<string, number>()
+    if (showLive) {
+      for (const s of parsed) {
+        const k = vehicleKey(s)
+        if ((livePerVehicle.get(k) ?? -Infinity) < s.startMs) livePerVehicle.set(k, s.startMs)
+      }
+    }
+
+    // Single-vehicle live stop (for the Live Now banner)
     const maxStartMs = parsed.length > 0 ? Math.max(...parsed.map((s) => s.startMs)) : -Infinity
     const liveStop   = showLive ? (parsed.find((s) => s.startMs === maxStartMs) ?? null) : null
 
     let sorted: Stop[]
     switch (sortMode) {
       case 'live':
-        // Most recent (live) stop at top → newest-first
-        sorted = [...parsed].sort((a, b) => b.startMs - a.startMs)
+        // Most recent stop per vehicle floated to top, then oldest-first within the rest
+        sorted = [...parsed].sort((a, b) => {
+          const aLive = livePerVehicle.get(vehicleKey(a)) === a.startMs ? 1 : 0
+          const bLive = livePerVehicle.get(vehicleKey(b)) === b.startMs ? 1 : 0
+          if (aLive !== bLive) return bLive - aLive
+          return b.startMs - a.startMs
+        })
         break
       case 'oldest':
-        // Chronological journey order → oldest-first
         sorted = [...parsed].sort((a, b) => a.startMs - b.startMs)
         break
       case 'duration':
-        // Longest stays first — useful for understanding where the asset spent most time
         sorted = [...parsed].sort((a, b) => b.minutes - a.minutes)
         break
       default:
         sorted = [...parsed].sort((a, b) => a.startMs - b.startMs)
     }
 
-    return { stops: sorted, liveStop }
+    return { stops: sorted, liveStop, livePerVehicle, isMultiVehicle }
   }, [rows, sortMode, showLive])
 
   if (stops.length === 0) return null
@@ -266,21 +292,34 @@ export default function LocationsVisitedTable({
                 <Box sx={{ position: 'relative', width: 12, height: 12, borderRadius: '50%', bgcolor: 'success.main' }} />
               </Box>
 
-              {/* Location text */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
-                <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.dark' }}>Live now</Typography>
-                <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'success.light', flexShrink: 0 }} />
-                {liveColor && <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: liveColor, flexShrink: 0 }} />}
-                <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>{liveStop.geofence}</Typography>
-                {liveStop.subZone && (
-                  <Typography variant="body2" color="text.secondary" noWrap>· {liveStop.subZone}</Typography>
-                )}
-              </Box>
+              {isMultiVehicle ? (
+                /* Multi-vehicle: summarise how many vehicles are live */
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.dark' }}>
+                    {livePerVehicle.size} vehicle{livePerVehicle.size !== 1 ? 's' : ''} · all live now
+                  </Typography>
+                  <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'success.light', flexShrink: 0 }} />
+                  <Typography variant="body2" color="text.secondary">Live badges shown on each vehicle's current stop below</Typography>
+                </Box>
+              ) : (
+                /* Single vehicle: show current location */
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.dark' }}>Live now</Typography>
+                  <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'success.light', flexShrink: 0 }} />
+                  {liveColor && <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: liveColor, flexShrink: 0 }} />}
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>{liveStop.geofence}</Typography>
+                  {liveStop.subZone && (
+                    <Typography variant="body2" color="text.secondary" noWrap>· {liveStop.subZone}</Typography>
+                  )}
+                </Box>
+              )}
 
-              {/* Since time */}
-              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                since {fmtTime(liveStop.startMs)}
-              </Typography>
+              {/* Since time — only meaningful for single vehicle */}
+              {!isMultiVehicle && (
+                <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                  since {fmtTime(liveStop.startMs)}
+                </Typography>
+              )}
             </Box>
           )}
 
@@ -314,7 +353,7 @@ export default function LocationsVisitedTable({
       <Collapse in={!collapsed}>
         {stops.map((stop, i) => {
           // isLive is based on startMs identity, not position — survives any sort order
-          const isLive     = showLive && liveStop !== null && stop.startMs === liveStop.startMs
+          const isLive     = showLive && livePerVehicle.get(vehicleKey(stop)) === stop.startMs
           const isSelected = selectedIndex === i
           const dotColor   = colorMap.get(stop.geofence) ?? '#9E9E9E'
 

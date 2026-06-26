@@ -342,7 +342,7 @@ export default function LocationHistoryDashboard({
             <>
               {/* Stat cards */}
               {!tableLoading && singleDayRows.length > 0 && (
-                <AssetStatCards rows={singleDayRows} datePeriod={singleDayPeriod} />
+                <AssetStatCards rows={singleDayRows} datePeriod={singleDayPeriod} showLive={showLive} />
               )}
 
               {/* Journey timeline */}
