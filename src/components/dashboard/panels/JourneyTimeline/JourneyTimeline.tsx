@@ -185,14 +185,14 @@ export default function JourneyTimeline({
   selectedIndex,
   onSelectIndex,
 }: JourneyTimelineProps) {
-  const { pings, allBlocks, uniqueGeofences, minMs, maxMs, timeTicks, isMultiDay, dayGroups, vehicleGroups, isMultiVehicle } =
+  const { pings, allBlocks, uniqueGeofences, minMs, maxMs, timeTicks, isMultiDay, dayGroups, vehicleGroups, isMultiVehicle, labelWidth } =
     useMemo(() => {
       const pings = parsePings(rows)
       if (pings.length === 0) {
         return {
           pings: [], allBlocks: [], uniqueGeofences: [],
           minMs: 0, maxMs: 0, timeTicks: [], isMultiDay: false, dayGroups: [],
-          vehicleGroups: [], isMultiVehicle: false,
+          vehicleGroups: [], isMultiVehicle: false, labelWidth: 80,
         }
       }
 
@@ -232,6 +232,12 @@ export default function JourneyTimeline({
         }
       }
 
+      // Compute label column width from the longest vehicle name so bars align.
+      // ~8.5px per bold character at font-size 12, minimum 80px.
+      const labelWidth = vehicleGroups.length > 1
+        ? Math.max(80, Math.max(...vehicleGroups.map((vg) => vg.label.length)) * 8.5)
+        : 80
+
       return {
         pings,
         allBlocks,
@@ -243,6 +249,7 @@ export default function JourneyTimeline({
         dayGroups: isMultiDay ? buildDayGroups(pings, minMs, maxMs) : [],
         vehicleGroups,
         isMultiVehicle: vehicleGroups.length > 1,
+        labelWidth,
       }
     }, [rows])
 
@@ -494,8 +501,8 @@ export default function JourneyTimeline({
           {vehicleGroups.map((vg) => (
             <Box key={vg.key} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
               {/* Vehicle label */}
-              <Box sx={{ width: 80, flexShrink: 0, textAlign: 'right' }}>
-                <Typography sx={{ fontSize: 12, fontWeight: 700, color: vg.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <Box sx={{ width: labelWidth, flexShrink: 0, textAlign: 'right' }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 700, color: vg.color, whiteSpace: 'nowrap' }}>
                   {vg.label}
                 </Typography>
               </Box>
@@ -579,7 +586,7 @@ export default function JourneyTimeline({
 
           {/* Shared x-axis */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, mt: 0.5 }}>
-            <Box sx={{ width: 80, flexShrink: 0 }} />
+            <Box sx={{ width: labelWidth, flexShrink: 0 }} />
             <Box sx={{ flex: 1, position: 'relative', height: 22 }}>
               {timeTicks.map((tick, i) => (
                 <Box
