@@ -31,10 +31,16 @@ function dataDir(clientId: string): string {
   return path.join(process.cwd(), 'src', 'data', clientId)
 }
 
+function readJson(filePath: string): string {
+  const text = fs.readFileSync(filePath, 'utf-8')
+  // Strip UTF-8 BOM (U+FEFF) — written by PowerShell Out-File -Encoding utf8
+  return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text
+}
+
 function loadRows(clientId: string): Row[] {
   if (rowCache.has(clientId)) return rowCache.get(clientId)!
   const filePath = path.join(dataDir(clientId), 'location-history.json')
-  const rows = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Row[]
+  const rows = JSON.parse(readJson(filePath)) as Row[]
   rowCache.set(clientId, rows)
   return rows
 }
@@ -42,7 +48,7 @@ function loadRows(clientId: string): Row[] {
 function loadMeta(clientId: string): DatasetMeta {
   if (metaCache.has(clientId)) return metaCache.get(clientId)!
   const filePath = path.join(dataDir(clientId), 'meta.json')
-  const meta = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as DatasetMeta
+  const meta = JSON.parse(readJson(filePath)) as DatasetMeta
   metaCache.set(clientId, meta)
   return meta
 }
