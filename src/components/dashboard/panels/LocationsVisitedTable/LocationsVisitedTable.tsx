@@ -299,7 +299,7 @@ export default function LocationsVisitedTable({
                     {livePerVehicle.size} vehicle{livePerVehicle.size !== 1 ? 's' : ''} · all live now
                   </Typography>
                   <Box sx={{ width: 3, height: 3, borderRadius: '50%', bgcolor: 'success.light', flexShrink: 0 }} />
-                  <Typography variant="body2" color="text.secondary">Live badges shown on each vehicle's current stop below</Typography>
+                  <Typography variant="body2" color="text.secondary">Live badges shown on each vehicle&apos;s current stop below</Typography>
                 </Box>
               ) : (
                 /* Single vehicle: show current location */
