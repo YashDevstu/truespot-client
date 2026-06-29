@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import Box from '@mui/material/Box'
 import Grid from '@mui/material/Grid'
 import Typography from '@mui/material/Typography'
@@ -73,6 +73,8 @@ export default function LocationHistoryDashboard({
   const [refreshToken, setRefreshToken] = useState(0)
   const [selectedStopIndex, setSelectedStopIndex] = useState<number | null>(null)
   const [customOpen, setCustomOpen] = useState(false)
+  // Fires once on fresh load — gate prevents re-triggering if the user clears the VIN
+  const hasAutoSelected = useRef(false)
 
   // Parse comma-separated date selection; empty / 'all' = show all 8 dates
   const selectedDates: string[] | null = (() => {
@@ -234,6 +236,32 @@ export default function LocationHistoryDashboard({
 
   // Show Live badge when Today's data is included
   const showLive = isAllDates || (selectedDates?.includes('Today') ?? false)
+
+  // On fresh load: once Today's rows arrive and no asset is manually selected,
+  // auto-select the VIN with the most recent StartTime ping.
+  useEffect(() => {
+    if (hasAutoSelected.current) return
+    if (tableLoading || tableRows.length === 0) return
+    if (filters.vin || filters.beaconId || filters.stockNumber) return
+    if (filters.dateSeen !== 'Today') return
+
+    let latestTime = -Infinity
+    let latestVin = ''
+    for (const row of tableRows) {
+      const vin = String(row['[VIN]'] ?? '').trim()
+      if (!vin) continue
+      const t = new Date(String(row['[StartTime]'] ?? '')).getTime()
+      if (!isNaN(t) && t > latestTime) {
+        latestTime = t
+        latestVin = vin
+      }
+    }
+
+    if (latestVin) {
+      hasAutoSelected.current = true
+      setFilter('vin', latestVin)
+    }
+  }, [tableRows, tableLoading, filters.vin, filters.beaconId, filters.stockNumber, filters.dateSeen, setFilter])
 
   // Anchor date labels to the last refresh date so "Yesterday" and the custom
   // range options align with what's actually in the data.
