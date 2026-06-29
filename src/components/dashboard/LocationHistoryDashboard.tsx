@@ -23,6 +23,7 @@ import JourneyTimeline from './panels/JourneyTimeline/JourneyTimeline'
 import AssetStatCards from './panels/AssetStatCards'
 import LocationsVisitedTable from './panels/LocationsVisitedTable'
 import SelectedAssetCard from './SelectedAssetCard'
+import VehicleMapPanel from './panels/VehicleMapPanel'
 
 // Parse "M/D/YY …" from the last-refresh string to get the data's anchor date.
 function parseLastRefreshDate(s: string | undefined): Date | undefined {
@@ -54,6 +55,7 @@ interface Props {
   dashboardKey: string
   displayName: string
   dashboardLabel: string
+  mapsKey: string
 }
 
 // Above this threshold we skip the timeline/table and show the AG Grid instead,
@@ -65,6 +67,7 @@ export default function LocationHistoryDashboard({
   dashboardKey,
   displayName,
   dashboardLabel,
+  mapsKey,
 }: Props) {
   const { filters, setFilter, resetFilters } = useFilters()
   const [refreshToken, setRefreshToken] = useState(0)
@@ -344,6 +347,9 @@ export default function LocationHistoryDashboard({
               {!tableLoading && singleDayRows.length > 0 && (
                 <AssetStatCards rows={singleDayRows} datePeriod={singleDayPeriod} showLive={showLive} />
               )}
+
+              {/* Vehicle position map */}
+              <VehicleMapPanel rows={singleDayRows} mapsKey={mapsKey} />
 
               {/* Journey timeline */}
               {timelineTooLarge ? (

@@ -22,6 +22,8 @@ export default async function DashboardPage({ params }: PageProps) {
   const dashboard = config.dashboards[dashboardKey]
   if (!dashboard) notFound()
 
+  const mapsKey = process.env.AZURE_MAPS_KEY ?? ''
+
   return (
     <Suspense
       fallback={
@@ -36,6 +38,7 @@ export default async function DashboardPage({ params }: PageProps) {
         dashboardKey={dashboardKey}
         displayName={config.display_name}
         dashboardLabel={dashboard.label}
+        mapsKey={mapsKey}
       />
     </Suspense>
   )
