@@ -1,7 +1,7 @@
 'use client'
-import 'azure-maps-control/dist/atlas.min.css'
+import 'mapbox-gl/dist/mapbox-gl.css'
 import { useEffect, useRef, useMemo } from 'react'
-import type * as AtlasTypes from 'azure-maps-control'
+import type mapboxgl from 'mapbox-gl'
 import Box from '@mui/material/Box'
 import Paper from '@mui/material/Paper'
 import Typography from '@mui/material/Typography'
@@ -31,9 +31,9 @@ export interface VehicleMapPanelProps {
 
 export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<AtlasTypes.Map | null>(null)
+  const mapRef = useRef<mapboxgl.Map | null>(null)
 
-  // Derive one pin per vehicle using the most recent row that has coordinates.
+  // One pin per vehicle — most recent row that has valid coordinates.
   const pins = useMemo<VehiclePin[]>(() => {
     const byVehicle = new Map<string, { row: Record<string, unknown>; time: number }>()
     for (const row of rows) {
@@ -77,100 +77,84 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
 
     let destroyed = false
 
-    import('azure-maps-control').then((atlas) => {
+    import('mapbox-gl').then((mod) => {
       if (destroyed || !containerRef.current) return
+
+      const mapboxgl = mod.default
 
       const avgLat = pins.reduce((s, p) => s + p.lat, 0) / pins.length
       const avgLon = pins.reduce((s, p) => s + p.lon, 0) / pins.length
 
-      const map = new atlas.Map(containerRef.current, {
-        authOptions: {
-          authType: atlas.AuthenticationType.subscriptionKey,
-          subscriptionKey: mapsKey,
-        },
-        style: 'satellite_road_labels',
+      const map = new mapboxgl.Map({
+        container: containerRef.current,
+        style: 'mapbox://styles/mapbox/satellite-streets-v12',
+        accessToken: mapsKey,
         center: [avgLon, avgLat],
-        zoom: 16,
-        language: 'en-US',
+        zoom: 15,
       })
       mapRef.current = map
 
-      map.events.add('ready', () => {
+      const popupRef = { current: null as mapboxgl.Popup | null }
+
+      map.on('load', () => {
         if (destroyed) return
 
-        const ds = new atlas.source.DataSource()
-        map.sources.add(ds)
-
         pins.forEach((p) => {
-          ds.add(new atlas.data.Feature(
-            new atlas.data.Point([p.lon, p.lat]),
-            { label: p.label, color: p.color, geofence: p.geofence, subZone: p.subZone, beaconId: p.beaconId, vin: p.vin },
-          ))
-        })
+          // Custom coloured dot marker
+          const el = document.createElement('div')
+          el.style.cssText = [
+            'width:22px', 'height:22px', 'border-radius:50%',
+            `background:${p.color}`, 'border:2.5px solid #fff',
+            'box-shadow:0 2px 8px rgba(0,0,0,.5)', 'cursor:pointer',
+          ].join(';')
 
-        const bubbleLayer = new atlas.layer.BubbleLayer(ds, undefined, {
-          radius: 11,
-          color: ['get', 'color'],
-          strokeColor: '#ffffff',
-          strokeWidth: 2.5,
-        })
-        map.layers.add(bubbleLayer)
+          const marker = new mapboxgl.Marker({ element: el })
+            .setLngLat([p.lon, p.lat])
+            .addTo(map)
 
-        // Vehicle label floating above each dot
-        map.layers.add(new atlas.layer.SymbolLayer(ds, undefined, {
-          iconOptions: { image: 'none' },
-          textOptions: {
-            textField: ['get', 'label'],
-            offset: [0, -2],
-            color: '#ffffff',
-            haloColor: 'rgba(0,0,0,0.72)',
-            haloWidth: 1.5,
-            size: 11,
-          },
-        }))
+          const popupContent = `
+            <div style="padding:11px 15px;font-family:system-ui,-apple-system,sans-serif;min-width:200px;line-height:1.6">
+              <div style="font-weight:700;font-size:13px;color:#111;margin-bottom:4px">${p.label}</div>
+              <div style="font-size:12px;color:#444;margin-bottom:2px">📍 ${p.geofence}</div>
+              ${p.subZone ? `<div style="font-size:11px;color:#777;margin-bottom:6px">${p.subZone}</div>` : ''}
+              <div style="border-top:1px solid #eee;margin-top:6px;padding-top:6px">
+                ${p.vin      ? `<div style="font-size:10px;color:#aaa;font-family:monospace">VIN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${p.vin}</div>` : ''}
+                ${p.beaconId ? `<div style="font-size:10px;color:#aaa">Beacon ${p.beaconId}</div>` : ''}
+              </div>
+            </div>`
 
-        const popup = new atlas.Popup({ closeButton: false, pixelOffset: [0, -18] })
-
-        map.events.add('mousemove', bubbleLayer, (e) => {
-          if (!e.shapes?.length) return
-          const shape = e.shapes[0] as AtlasTypes.Shape
-          const props = shape.getProperties() as Record<string, string>
-          const pos   = shape.getCoordinates() as AtlasTypes.data.Position
-          popup.setOptions({
-            position: pos,
-            content: `
-              <div style="padding:11px 15px;font-family:system-ui,-apple-system,sans-serif;min-width:200px;line-height:1.6">
-                <div style="font-weight:700;font-size:13px;color:#111;margin-bottom:4px">${props.label}</div>
-                <div style="font-size:12px;color:#444;margin-bottom:2px">📍 ${props.geofence}</div>
-                ${props.subZone ? `<div style="font-size:11px;color:#777;margin-bottom:6px">${props.subZone}</div>` : ''}
-                <div style="border-top:1px solid #eee;margin-top:6px;padding-top:6px">
-                  ${props.vin    ? `<div style="font-size:10px;color:#aaa;font-family:monospace">VIN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${props.vin}</div>`    : ''}
-                  ${props.beaconId ? `<div style="font-size:10px;color:#aaa">Beacon ${props.beaconId}</div>` : ''}
-                </div>
-              </div>`,
+          el.addEventListener('mouseenter', () => {
+            if (popupRef.current) popupRef.current.remove()
+            popupRef.current = new mapboxgl.Popup({
+              closeButton: false,
+              offset: 16,
+              maxWidth: '260px',
+            })
+              .setLngLat([p.lon, p.lat])
+              .setHTML(popupContent)
+              .addTo(map)
           })
-          popup.open(map)
-          ;(map.getCanvasContainer() as HTMLElement).style.cursor = 'pointer'
+
+          el.addEventListener('mouseleave', () => {
+            popupRef.current?.remove()
+            popupRef.current = null
+          })
+
+          marker.getElement().dataset.pin = p.key
         })
 
-        map.events.add('mouseleave', bubbleLayer, () => {
-          popup.close()
-          ;(map.getCanvasContainer() as HTMLElement).style.cursor = ''
-        })
-
-        // Auto-fit bounds to show all pins when multiple vehicles
+        // Auto-fit to show all pins when multiple vehicles
         if (pins.length > 1) {
-          const bbox = atlas.data.BoundingBox.fromPositions(
-            pins.map((p): AtlasTypes.data.Position => [p.lon, p.lat]),
-          )
-          map.setCamera({ bounds: bbox, padding: { top: 64, bottom: 64, left: 64, right: 64 } })
+          const bounds = new mapboxgl.LngLatBounds()
+          pins.forEach((p) => bounds.extend([p.lon, p.lat]))
+          map.fitBounds(bounds, { padding: 80, maxZoom: 17 })
         }
       })
     })
 
     return () => {
       destroyed = true
-      mapRef.current?.dispose()
+      mapRef.current?.remove()
       mapRef.current = null
     }
   }, [pins, mapsKey])
@@ -179,7 +163,7 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
 
   return (
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-      {/* ── Header ────────────────────────────────────────────────────────── */}
+      {/* Header */}
       <Box sx={{
         px: 2.5, py: 1.5,
         display: 'flex', alignItems: 'center', gap: 1,
@@ -195,7 +179,7 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
         </Typography>
       </Box>
 
-      {/* ── Map or empty state ────────────────────────────────────────────── */}
+      {/* Map or empty state */}
       {hasData ? (
         <Box ref={containerRef} sx={{ height: 360, width: '100%' }} />
       ) : (
@@ -215,7 +199,7 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
         </Box>
       )}
 
-      {/* ── Vehicle legend ────────────────────────────────────────────────── */}
+      {/* Vehicle legend */}
       {hasData && (
         <Box sx={{
           px: 2.5, py: 1.25,

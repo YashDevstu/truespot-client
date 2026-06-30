@@ -22,7 +22,7 @@ export default async function DashboardPage({ params }: PageProps) {
   const dashboard = config.dashboards[dashboardKey]
   if (!dashboard) notFound()
 
-  const mapsKey = process.env.AZURE_MAPS_KEY ?? ''
+  const mapsKey = process.env.MAPBOX_TOKEN ?? ''
 
   return (
     <Suspense
