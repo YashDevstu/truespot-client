@@ -238,15 +238,55 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
         return
       }
 
-      const color = pins[0]?.color ?? DOT_COLORS[0]
+      const p     = pins[0]
+      const color = p?.color ?? DOT_COLORS[0]
       const pinEl = makeStopPin(color)
+
+      const durationMin = Math.round((focusCoords.endMs - focusCoords.startMs) / 60_000)
+      const durStr = durationMin >= 60
+        ? `${Math.floor(durationMin / 60)}h ${durationMin % 60 > 0 ? durationMin % 60 + 'm' : ''}`.trim()
+        : `${durationMin}m`
+
+      const stopHtml = `
+        <div style="padding:12px 15px;font-family:system-ui,-apple-system,sans-serif;min-width:220px;line-height:1.65">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></div>
+            <span style="font-weight:700;font-size:13px;color:#111">${p?.label ?? 'Vehicle'}</span>
+            <span style="margin-left:auto;font-size:10px;font-weight:600;color:#6366f1;
+              background:#eef2ff;border:1px solid #c7d2fe;border-radius:4px;padding:1px 6px">STOP</span>
+          </div>
+          <div style="font-size:12px;color:#555;margin-bottom:3px">📍 ${focusCoords.geofence}</div>
+          ${focusCoords.subZone ? `<div style="font-size:11px;color:#888;margin-bottom:6px">${focusCoords.subZone}</div>` : ''}
+          <div style="border-top:1px solid #f0f0f0;margin-top:7px;padding-top:7px;display:flex;flex-direction:column;gap:3px">
+            <div style="font-size:11px;color:#555">
+              🕐 ${fmtTime(focusCoords.startMs)} → ${fmtTime(focusCoords.endMs)}
+            </div>
+            <div style="font-size:11px;color:#888">⏱ ${durStr} at this location</div>
+          </div>
+        </div>`
 
       import('mapbox-gl').then((mod) => {
         if (!mapRef.current) return
-        const marker = new mod.default.Marker({ element: pinEl, anchor: 'bottom' })
+        const mapboxgl = mod.default
+
+        const marker = new mapboxgl.Marker({ element: pinEl, anchor: 'bottom' })
           .setLngLat([focusCoords.lon, focusCoords.lat])
           .addTo(mapRef.current)
         selectedMarker.current = marker
+
+        let stopPopup: mapboxgl.Popup | null = null
+        pinEl.addEventListener('mouseenter', () => {
+          stopPopup?.remove()
+          stopPopup = new mapboxgl.Popup({ closeButton: false, offset: 40, maxWidth: '270px' })
+            .setLngLat([focusCoords.lon, focusCoords.lat])
+            .setHTML(stopHtml)
+            .addTo(mapRef.current!)
+        })
+        pinEl.addEventListener('mouseleave', () => {
+          stopPopup?.remove()
+          stopPopup = null
+        })
+
         mapRef.current.flyTo({ center: [focusCoords.lon, focusCoords.lat], zoom: 18, duration: 900 })
       })
     }
