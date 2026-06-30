@@ -33,18 +33,20 @@ function injectMapStyles() {
   document.head.appendChild(s)
 }
 
-// Sonar-ping live marker — two expanding rings + solid core
-function makeLiveMarker(color: string): HTMLElement {
+const LIVE_GREEN = '#22c55e'
+
+// Sonar-ping live marker — always green, two expanding rings + solid core
+function makeLiveMarker(): HTMLElement {
   injectMapStyles()
   const wrapper = document.createElement('div')
   wrapper.style.cssText = 'position:relative;width:44px;height:44px;cursor:pointer'
   wrapper.innerHTML = `
-    <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${color};
+    <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${LIVE_GREEN};
       animation:sonarRing 2.3s ease-out infinite;pointer-events:none"></div>
-    <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${color};
+    <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${LIVE_GREEN};
       animation:sonarRing 2.3s ease-out .9s infinite;pointer-events:none"></div>
-    <div style="position:absolute;inset:11px;border-radius:50%;background:${color};
-      border:2.5px solid #fff;box-shadow:0 0 0 3px ${color}35,0 2px 10px rgba(0,0,0,.5)"></div>
+    <div style="position:absolute;inset:11px;border-radius:50%;background:${LIVE_GREEN};
+      border:2.5px solid #fff;box-shadow:0 0 0 3px ${LIVE_GREEN}35,0 2px 10px rgba(0,0,0,.5)"></div>
   `
   return wrapper
 }
@@ -164,7 +166,7 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
         if (destroyed) return
 
         pins.forEach((p) => {
-          const el = makeLiveMarker(p.color)
+          const el = makeLiveMarker()
 
           new mapboxgl.Marker({ element: el, anchor: 'center' })
             .setLngLat([p.lon, p.lat])
@@ -188,8 +190,9 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
 
           el.addEventListener('mouseenter', () => {
             popupRef.current?.remove()
-            popupRef.current = new mapboxgl.Popup({ closeButton: false, offset: 24, maxWidth: '270px' })
-              .setLngLat([p.lon, p.lat]).setHTML(html).addTo(map)
+            popupRef.current = new mapboxgl.Popup({
+              closeButton: false, anchor: 'bottom', offset: [0, -26], maxWidth: '270px',
+            }).setLngLat([p.lon, p.lat]).setHTML(html).addTo(map)
           })
           el.addEventListener('mouseleave', () => {
             popupRef.current?.remove()
@@ -277,8 +280,9 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
         let stopPopup: mapboxgl.Popup | null = null
         pinEl.addEventListener('mouseenter', () => {
           stopPopup?.remove()
-          stopPopup = new mapboxgl.Popup({ closeButton: false, offset: 40, maxWidth: '270px' })
-            .setLngLat([focusCoords.lon, focusCoords.lat])
+          stopPopup = new mapboxgl.Popup({
+            closeButton: false, anchor: 'bottom', offset: [0, -48], maxWidth: '270px',
+          }).setLngLat([focusCoords.lon, focusCoords.lat])
             .setHTML(stopHtml)
             .addTo(mapRef.current!)
         })
