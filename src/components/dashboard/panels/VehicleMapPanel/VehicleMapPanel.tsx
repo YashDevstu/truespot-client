@@ -5,6 +5,8 @@ import type mapboxgl from 'mapbox-gl'
 import Box from '@mui/material/Box'
 import Paper from '@mui/material/Paper'
 import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
+import MyLocationIcon from '@mui/icons-material/MyLocation'
 import LocationOnOutlinedIcon from '@mui/icons-material/LocationOnOutlined'
 
 const DOT_COLORS = [
@@ -12,23 +14,79 @@ const DOT_COLORS = [
   '#00BCD4', '#FF9800', '#E91E63', '#607D8B',
 ]
 
+// ── CSS animations injected once into <head> ────────────────────────────────
+function injectMapStyles() {
+  if (document.getElementById('mbMapStyles')) return
+  const s = document.createElement('style')
+  s.id = 'mbMapStyles'
+  s.textContent = `
+    @keyframes sonarRing {
+      0%   { transform:scale(.35); opacity:.9 }
+      100% { transform:scale(2.9); opacity:0  }
+    }
+    @keyframes pinDrop {
+      0%   { transform:scale(0) translateY(-14px); opacity:0 }
+      65%  { transform:scale(1.12) translateY(3px); opacity:1 }
+      100% { transform:scale(1) translateY(0);      opacity:1 }
+    }
+  `
+  document.head.appendChild(s)
+}
+
+// Sonar-ping live marker — two expanding rings + solid core
+function makeLiveMarker(color: string): HTMLElement {
+  injectMapStyles()
+  const wrapper = document.createElement('div')
+  wrapper.style.cssText = 'position:relative;width:44px;height:44px;cursor:pointer'
+  wrapper.innerHTML = `
+    <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${color};
+      animation:sonarRing 2.3s ease-out infinite;pointer-events:none"></div>
+    <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${color};
+      animation:sonarRing 2.3s ease-out .9s infinite;pointer-events:none"></div>
+    <div style="position:absolute;inset:11px;border-radius:50%;background:${color};
+      border:2.5px solid #fff;box-shadow:0 0 0 3px ${color}35,0 2px 10px rgba(0,0,0,.5)"></div>
+  `
+  return wrapper
+}
+
+// SVG teardrop location pin — clearly a historical point-in-time marker
+function makeStopPin(color: string): HTMLElement {
+  injectMapStyles()
+  const el = document.createElement('div')
+  el.style.cssText = [
+    'cursor:default',
+    'transform-origin:50% 100%',
+    'animation:pinDrop .38s cubic-bezier(.34,1.56,.64,1)',
+    'filter:drop-shadow(0 3px 7px rgba(0,0,0,.45))',
+  ].join(';')
+  el.innerHTML = `
+    <svg width="32" height="40" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M16 0C7.163 0 0 7.163 0 16c0 10.4 16 24 16 24S32 26.4 32 16C32 7.163 24.837 0 16 0z"
+        fill="${color}"/>
+      <circle cx="16" cy="16" r="8" fill="white"/>
+      <circle cx="16" cy="16" r="4.5" fill="${color}"/>
+    </svg>`
+  return el
+}
+
+function fmtTime(ms: number): string {
+  const d = new Date(ms)
+  const h = d.getHours(), m = d.getMinutes()
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`
+}
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
 interface VehiclePin {
-  key: string
-  label: string
-  color: string
-  lat: number
-  lon: number
-  geofence: string
-  subZone: string
-  beaconId: string
-  vin: string
+  key: string; label: string; color: string
+  lat: number; lon: number
+  geofence: string; subZone: string; beaconId: string; vin: string
 }
 
 export interface FocusCoords {
-  lat: number
-  lon: number
-  geofence: string
-  subZone: string
+  lat: number; lon: number
+  geofence: string; subZone: string
+  startMs: number; endMs: number
 }
 
 export interface VehicleMapPanelProps {
@@ -37,13 +95,14 @@ export interface VehicleMapPanelProps {
   focusCoords?: FocusCoords | null
 }
 
-export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleMapPanelProps) {
-  const containerRef    = useRef<HTMLDivElement>(null)
-  const mapRef          = useRef<mapboxgl.Map | null>(null)
-  const selectedMarker  = useRef<mapboxgl.Marker | null>(null)
-  const mapReadyRef     = useRef(false)
+// ── Component ───────────────────────────────────────────────────────────────
 
-  // One pin per vehicle — most recent row that has valid coordinates.
+export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleMapPanelProps) {
+  const containerRef   = useRef<HTMLDivElement>(null)
+  const mapRef         = useRef<mapboxgl.Map | null>(null)
+  const selectedMarker = useRef<mapboxgl.Marker | null>(null)
+
+  // One pin per vehicle — most recent row with valid coordinates
   const pins = useMemo<VehiclePin[]>(() => {
     const byVehicle = new Map<string, { row: Record<string, unknown>; time: number }>()
     for (const row of rows) {
@@ -59,20 +118,18 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
       const ex = byVehicle.get(key)
       if (!ex || t > ex.time) byVehicle.set(key, { row, time: t })
     }
-
     let ci = 0
     return [...byVehicle.entries()].map(([key, { row }]) => {
       const model  = String(row['[Model]']    ?? '').trim()
       const year   = String(row['[Year]']     ?? '').trim()
       const vin    = String(row['[VIN]']      ?? '').trim()
       const beacon = String(row['[BeaconId]'] ?? '').trim()
-      const lat    = parseFloat(String(row['[Latitude]']  ?? ''))
-      const lon    = parseFloat(String(row['[Longitude]'] ?? ''))
       return {
         key,
         label:    [model, year ? `'${year.slice(-2)}` : ''].filter(Boolean).join(' ') || vin || key,
         color:    DOT_COLORS[ci++ % DOT_COLORS.length],
-        lat, lon,
+        lat:      parseFloat(String(row['[Latitude]']  ?? '')),
+        lon:      parseFloat(String(row['[Longitude]'] ?? '')),
         geofence: String(row['[Geofence]']   ?? ''),
         subZone:  String(row['[SubGeoZone]'] ?? ''),
         beaconId: beacon, vin,
@@ -80,10 +137,9 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
     })
   }, [rows])
 
-  // ── Map initialisation ──────────────────────────────────────────────────────
+  // ── Map initialisation ────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || !mapsKey || pins.length === 0) return
-
     let destroyed = false
 
     import('mapbox-gl').then((mod) => {
@@ -106,34 +162,33 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
 
       map.on('load', () => {
         if (destroyed) return
-        mapReadyRef.current = true
 
         pins.forEach((p) => {
-          const el = document.createElement('div')
-          el.style.cssText = [
-            'width:22px', 'height:22px', 'border-radius:50%',
-            `background:${p.color}`, 'border:2.5px solid #fff',
-            'box-shadow:0 2px 8px rgba(0,0,0,.5)', 'cursor:pointer',
-          ].join(';')
+          const el = makeLiveMarker(p.color)
 
-          new mapboxgl.Marker({ element: el })
+          new mapboxgl.Marker({ element: el, anchor: 'center' })
             .setLngLat([p.lon, p.lat])
             .addTo(map)
 
           const html = `
-            <div style="padding:11px 15px;font-family:system-ui,-apple-system,sans-serif;min-width:200px;line-height:1.6">
-              <div style="font-weight:700;font-size:13px;color:#111;margin-bottom:4px">${p.label}</div>
-              <div style="font-size:12px;color:#444;margin-bottom:2px">📍 ${p.geofence}</div>
-              ${p.subZone ? `<div style="font-size:11px;color:#777;margin-bottom:6px">${p.subZone}</div>` : ''}
-              <div style="border-top:1px solid #eee;margin-top:6px;padding-top:6px">
-                ${p.vin      ? `<div style="font-size:10px;color:#aaa;font-family:monospace">VIN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${p.vin}</div>` : ''}
-                ${p.beaconId ? `<div style="font-size:10px;color:#aaa">Beacon ${p.beaconId}</div>` : ''}
+            <div style="padding:12px 15px;font-family:system-ui,-apple-system,sans-serif;min-width:210px;line-height:1.65">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+                <div style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0"></div>
+                <span style="font-weight:700;font-size:13px;color:#111">${p.label}</span>
+                <span style="margin-left:auto;font-size:10px;font-weight:600;color:#22c55e;
+                  background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;padding:1px 6px">LIVE</span>
+              </div>
+              <div style="font-size:12px;color:#555;margin-bottom:3px">📍 ${p.geofence}</div>
+              ${p.subZone ? `<div style="font-size:11px;color:#888;margin-bottom:6px">${p.subZone}</div>` : ''}
+              <div style="border-top:1px solid #f0f0f0;margin-top:7px;padding-top:7px;display:flex;flex-direction:column;gap:2px">
+                ${p.vin      ? `<div style="font-size:10px;color:#bbb;font-family:monospace;letter-spacing:.4px">VIN&nbsp;&nbsp;${p.vin}</div>` : ''}
+                ${p.beaconId ? `<div style="font-size:10px;color:#bbb">Beacon&nbsp;${p.beaconId}</div>` : ''}
               </div>
             </div>`
 
           el.addEventListener('mouseenter', () => {
             popupRef.current?.remove()
-            popupRef.current = new mapboxgl.Popup({ closeButton: false, offset: 16, maxWidth: '260px' })
+            popupRef.current = new mapboxgl.Popup({ closeButton: false, offset: 24, maxWidth: '270px' })
               .setLngLat([p.lon, p.lat]).setHTML(html).addTo(map)
           })
           el.addEventListener('mouseleave', () => {
@@ -152,7 +207,6 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
 
     return () => {
       destroyed = true
-      mapReadyRef.current = false
       selectedMarker.current?.remove()
       selectedMarker.current = null
       mapRef.current?.remove()
@@ -160,86 +214,111 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
     }
   }, [pins, mapsKey])
 
-  // ── Focus on selected stop ──────────────────────────────────────────────────
+  // ── React to selected stop ────────────────────────────────────────────────
   useEffect(() => {
-    if (!mapReadyRef.current || !mapRef.current) return
+    const map = mapRef.current
+    if (!map) return
 
-    // Remove any previous selected-stop marker
-    selectedMarker.current?.remove()
-    selectedMarker.current = null
+    const applyFocus = () => {
+      selectedMarker.current?.remove()
+      selectedMarker.current = null
 
-    if (!focusCoords) {
-      // No stop selected — fly back to the live (most recent) position
-      if (pins.length === 1) {
-        mapRef.current.flyTo({ center: [pins[0].lon, pins[0].lat], zoom: 17, duration: 900 })
-      } else if (pins.length > 1) {
-        import('mapbox-gl').then((mod) => {
-          if (!mapRef.current) return
-          const bounds = new mod.default.LngLatBounds()
-          pins.forEach((p) => bounds.extend([p.lon, p.lat]))
-          mapRef.current.fitBounds(bounds, { padding: 80, maxZoom: 17, duration: 900 })
-        })
+      if (!focusCoords) {
+        // Fly back to live position
+        if (pins.length === 1) {
+          map.flyTo({ center: [pins[0].lon, pins[0].lat], zoom: 17, duration: 900 })
+        } else if (pins.length > 1) {
+          import('mapbox-gl').then((mod) => {
+            if (!mapRef.current) return
+            const bounds = new mod.default.LngLatBounds()
+            pins.forEach((p) => bounds.extend([p.lon, p.lat]))
+            mapRef.current.fitBounds(bounds, { padding: 80, maxZoom: 17, duration: 900 })
+          })
+        }
+        return
       }
-      return
+
+      const color = pins[0]?.color ?? DOT_COLORS[0]
+      const pinEl = makeStopPin(color)
+
+      import('mapbox-gl').then((mod) => {
+        if (!mapRef.current) return
+        const marker = new mod.default.Marker({ element: pinEl, anchor: 'bottom' })
+          .setLngLat([focusCoords.lon, focusCoords.lat])
+          .addTo(mapRef.current)
+        selectedMarker.current = marker
+        mapRef.current.flyTo({ center: [focusCoords.lon, focusCoords.lat], zoom: 18, duration: 900 })
+      })
     }
 
-    // Inject pulse keyframe once
-    if (!document.getElementById('mbPulseStyle')) {
-      const s = document.createElement('style')
-      s.id = 'mbPulseStyle'
-      s.textContent = '@keyframes mbPulse{0%{transform:scale(1);opacity:.75}100%{transform:scale(2.8);opacity:0}}'
-      document.head.appendChild(s)
+    if (map.isStyleLoaded()) {
+      applyFocus()
+    } else {
+      map.once('load', applyFocus)
+      return () => { map.off('load', applyFocus) }
     }
-
-    const color = pins[0]?.color ?? DOT_COLORS[0]
-
-    const wrapper = document.createElement('div')
-    wrapper.style.cssText = 'position:relative;width:26px;height:26px'
-    const ring = document.createElement('div')
-    ring.style.cssText = `position:absolute;inset:-5px;border-radius:50%;border:3px solid ${color};animation:mbPulse 1.6s ease-out infinite`
-    const dot = document.createElement('div')
-    dot.style.cssText = `position:absolute;inset:0;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 12px rgba(0,0,0,.6);z-index:1`
-    wrapper.appendChild(ring)
-    wrapper.appendChild(dot)
-
-    import('mapbox-gl').then((mod) => {
-      if (!mapRef.current) return
-      const marker = new mod.default.Marker({ element: wrapper })
-        .setLngLat([focusCoords.lon, focusCoords.lat])
-        .addTo(mapRef.current)
-      selectedMarker.current = marker
-      mapRef.current.flyTo({ center: [focusCoords.lon, focusCoords.lat], zoom: 18, duration: 900 })
-    })
   }, [focusCoords, pins])
 
   const hasData = pins.length > 0
+  const isLive  = hasData && !focusCoords
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-      {/* Header */}
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', bgcolor: 'background.paper' }}>
+
+      {/* ── Header ────────────────────────────────────────────────────────── */}
       <Box sx={{
         px: 2.5, py: 1.5,
-        display: 'flex', alignItems: 'center', gap: 1,
+        display: 'flex', alignItems: 'center', gap: 1.5,
         borderBottom: '1px solid', borderColor: 'divider',
-        bgcolor: 'background.paper',
       }}>
-        <LocationOnOutlinedIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-        <Typography variant="subtitle1" sx={{ fontWeight: 700, flex: 1 }}>Live Positions</Typography>
-        <Typography variant="caption" color="text.disabled">
-          {hasData
-            ? focusCoords
-              ? `📍 ${focusCoords.geofence}${focusCoords.subZone ? ` · ${focusCoords.subZone}` : ''}`
-              : `${pins.length} vehicle${pins.length !== 1 ? 's' : ''} · live`
-            : 'No coordinate data'}
+        {isLive
+          ? <MyLocationIcon sx={{ fontSize: 17, color: '#22c55e' }} />
+          : <LocationOnOutlinedIcon sx={{ fontSize: 17, color: 'primary.main' }} />
+        }
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, flex: 1, fontSize: 14 }}>
+          {focusCoords ? focusCoords.geofence : 'Live Positions'}
         </Typography>
+
+        {/* Right side badge */}
+        {hasData && (
+          isLive ? (
+            <Chip
+              size="small"
+              label="LIVE"
+              sx={{
+                height: 22, fontSize: 10, fontWeight: 700, letterSpacing: '.6px',
+                bgcolor: '#f0fdf4', color: '#16a34a',
+                border: '1px solid #bbf7d0',
+                '& .MuiChip-label': { px: 1 },
+                '&::before': {
+                  content: '""',
+                  display: 'inline-block',
+                  width: 7, height: 7,
+                  borderRadius: '50%',
+                  bgcolor: '#22c55e',
+                  mr: 0.75,
+                  animation: 'liveDot 1.8s ease-in-out infinite',
+                  '@keyframes liveDot': {
+                    '0%,100%': { opacity: 1 },
+                    '50%':     { opacity: .3 },
+                  },
+                },
+              }}
+            />
+          ) : (
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: 11 }}>
+              {focusCoords?.subZone || 'historical stop'}
+            </Typography>
+          )
+        )}
       </Box>
 
-      {/* Map or empty state */}
+      {/* ── Map ───────────────────────────────────────────────────────────── */}
       {hasData ? (
-        <Box ref={containerRef} sx={{ height: 360, width: '100%' }} />
+        <Box ref={containerRef} sx={{ height: 380, width: '100%' }} />
       ) : (
         <Box sx={{
-          height: 360, display: 'flex', flexDirection: 'column',
+          height: 380, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
           bgcolor: 'grey.50', gap: 1.5, px: 3,
         }}>
@@ -254,25 +333,40 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
         </Box>
       )}
 
-      {/* Vehicle legend */}
+      {/* ── Footer legend ─────────────────────────────────────────────────── */}
       {hasData && (
         <Box sx={{
           px: 2.5, py: 1.25,
           borderTop: '1px solid', borderColor: 'divider',
-          display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center',
-          bgcolor: 'background.paper',
+          display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2,
         }}>
+          {/* Vehicle dots */}
           {pins.map((p) => (
             <Box key={p.key} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: p.color, flexShrink: 0 }} />
-              <Typography variant="caption" color="text.secondary">{p.label}</Typography>
+              <Box sx={{
+                width: 10, height: 10, borderRadius: '50%',
+                bgcolor: p.color, flexShrink: 0,
+                boxShadow: `0 0 0 2px ${p.color}30`,
+              }} />
+              <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: 11 }}>
+                {p.label}
+              </Typography>
             </Box>
           ))}
-          {focusCoords && (
-            <Typography variant="caption" color="text.disabled" sx={{ ml: 'auto' }}>
-              click segment again to reset
-            </Typography>
-          )}
+
+          {/* Stop time when focused, or hint when live */}
+          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {focusCoords ? (
+              <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: 11 }}>
+                {fmtTime(focusCoords.startMs)} → {fmtTime(focusCoords.endMs)}
+                &nbsp;·&nbsp;click again to reset
+              </Typography>
+            ) : (
+              <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: 11 }}>
+                satellite view · click a timeline segment to inspect
+              </Typography>
+            )}
+          </Box>
         </Box>
       )}
     </Paper>

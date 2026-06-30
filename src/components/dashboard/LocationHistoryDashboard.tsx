@@ -218,7 +218,7 @@ export default function LocationHistoryDashboard({
       const lat = parseFloat(String(row['[Latitude]']  ?? ''))
       const lon = parseFloat(String(row['[Longitude]'] ?? ''))
       if (isFinite(lat) && isFinite(lon) && !(lat === 0 && lon === 0)) {
-        return { lat, lon, geofence: stop.geofence, subZone: stop.subGeoZone }
+        return { lat, lon, geofence: stop.geofence, subZone: stop.subGeoZone, startMs: stop.startMs, endMs: stop.endMs }
       }
     }
     return null
