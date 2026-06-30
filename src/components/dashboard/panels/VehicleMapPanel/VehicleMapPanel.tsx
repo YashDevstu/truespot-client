@@ -5,7 +5,6 @@ import type mapboxgl from 'mapbox-gl'
 import Box from '@mui/material/Box'
 import Paper from '@mui/material/Paper'
 import Typography from '@mui/material/Typography'
-import Chip from '@mui/material/Chip'
 import MyLocationIcon from '@mui/icons-material/MyLocation'
 import LocationOnOutlinedIcon from '@mui/icons-material/LocationOnOutlined'
 
@@ -278,7 +277,7 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
           el.addEventListener('mouseenter', () => {
             popupRef.current?.remove()
             popupRef.current = new mapboxgl.Popup({
-              closeButton: false, anchor: 'bottom', offset: [0, -26], maxWidth: '280px',
+              closeButton: false, anchor: 'top', offset: [0, 26], maxWidth: '280px',
             }).setLngLat([p.lon, p.lat]).setHTML(html).addTo(map)
           })
           el.addEventListener('mouseleave', () => {
@@ -372,7 +371,7 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
         pinEl.addEventListener('mouseenter', () => {
           stopPopup?.remove()
           stopPopup = new mapboxgl.Popup({
-            closeButton: false, anchor: 'bottom', offset: [0, -48], maxWidth: '280px',
+            closeButton: false, anchor: 'top', offset: [0, 14], maxWidth: '280px',
           }).setLngLat([focusCoords.lon, focusCoords.lat])
             .setHTML(stopHtml)
             .addTo(mapRef.current!)
@@ -418,29 +417,24 @@ export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleM
 
         {hasData && (
           isLive ? (
-            <Chip
-              size="small"
-              label="LIVE"
-              sx={{
-                height: 22, fontSize: 10, fontWeight: 700, letterSpacing: '.6px',
-                bgcolor: '#f0fdf4', color: '#16a34a',
-                border: '1px solid #bbf7d0',
-                '& .MuiChip-label': { px: 1 },
-                '&::before': {
-                  content: '""',
-                  display: 'inline-block',
-                  width: 7, height: 7,
-                  borderRadius: '50%',
-                  bgcolor: '#22c55e',
-                  mr: 0.75,
-                  animation: 'liveDot 1.8s ease-in-out infinite',
-                  '@keyframes liveDot': {
-                    '0%,100%': { opacity: 1 },
-                    '50%':     { opacity: .3 },
-                  },
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 0.75,
+              px: 1.25, py: 0.4,
+              bgcolor: '#f0fdf4', border: '1px solid #bbf7d0',
+              borderRadius: 1.5, flexShrink: 0,
+            }}>
+              <Box sx={{
+                width: 7, height: 7, borderRadius: '50%', bgcolor: '#22c55e', flexShrink: 0,
+                '@keyframes livePulse': {
+                  '0%,100%': { boxShadow: '0 0 0 0 #22c55e80' },
+                  '50%':     { boxShadow: '0 0 0 4px transparent' },
                 },
-              }}
-            />
+                animation: 'livePulse 1.8s ease-in-out infinite',
+              }} />
+              <Typography sx={{ fontSize: 10, fontWeight: 700, letterSpacing: '.7px', color: '#16a34a', lineHeight: 1 }}>
+                LIVE
+              </Typography>
+            </Box>
           ) : (
             <Typography variant="caption" color="text.disabled" sx={{ fontSize: 11 }}>
               {focusCoords?.subZone || 'historical stop'}
