@@ -24,14 +24,24 @@ interface VehiclePin {
   vin: string
 }
 
+export interface FocusCoords {
+  lat: number
+  lon: number
+  geofence: string
+  subZone: string
+}
+
 export interface VehicleMapPanelProps {
   rows: Record<string, unknown>[]
   mapsKey: string
+  focusCoords?: FocusCoords | null
 }
 
-export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<mapboxgl.Map | null>(null)
+export default function VehicleMapPanel({ rows, mapsKey, focusCoords }: VehicleMapPanelProps) {
+  const containerRef    = useRef<HTMLDivElement>(null)
+  const mapRef          = useRef<mapboxgl.Map | null>(null)
+  const selectedMarker  = useRef<mapboxgl.Marker | null>(null)
+  const mapReadyRef     = useRef(false)
 
   // One pin per vehicle — most recent row that has valid coordinates.
   const pins = useMemo<VehiclePin[]>(() => {
@@ -52,26 +62,25 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
 
     let ci = 0
     return [...byVehicle.entries()].map(([key, { row }]) => {
-      const model  = String(row['[Model]']     ?? '').trim()
-      const year   = String(row['[Year]']      ?? '').trim()
-      const vin    = String(row['[VIN]']       ?? '').trim()
-      const beacon = String(row['[BeaconId]']  ?? '').trim()
+      const model  = String(row['[Model]']    ?? '').trim()
+      const year   = String(row['[Year]']     ?? '').trim()
+      const vin    = String(row['[VIN]']      ?? '').trim()
+      const beacon = String(row['[BeaconId]'] ?? '').trim()
       const lat    = parseFloat(String(row['[Latitude]']  ?? ''))
       const lon    = parseFloat(String(row['[Longitude]'] ?? ''))
       return {
         key,
         label:    [model, year ? `'${year.slice(-2)}` : ''].filter(Boolean).join(' ') || vin || key,
         color:    DOT_COLORS[ci++ % DOT_COLORS.length],
-        lat,
-        lon,
+        lat, lon,
         geofence: String(row['[Geofence]']   ?? ''),
         subZone:  String(row['[SubGeoZone]'] ?? ''),
-        beaconId: beacon,
-        vin,
+        beaconId: beacon, vin,
       }
     })
   }, [rows])
 
+  // ── Map initialisation ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || !mapsKey || pins.length === 0) return
 
@@ -79,7 +88,6 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
 
     import('mapbox-gl').then((mod) => {
       if (destroyed || !containerRef.current) return
-
       const mapboxgl = mod.default
 
       const avgLat = pins.reduce((s, p) => s + p.lat, 0) / pins.length
@@ -98,9 +106,9 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
 
       map.on('load', () => {
         if (destroyed) return
+        mapReadyRef.current = true
 
         pins.forEach((p) => {
-          // Custom coloured dot marker
           const el = document.createElement('div')
           el.style.cssText = [
             'width:22px', 'height:22px', 'border-radius:50%',
@@ -108,11 +116,11 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
             'box-shadow:0 2px 8px rgba(0,0,0,.5)', 'cursor:pointer',
           ].join(';')
 
-          const marker = new mapboxgl.Marker({ element: el })
+          new mapboxgl.Marker({ element: el })
             .setLngLat([p.lon, p.lat])
             .addTo(map)
 
-          const popupContent = `
+          const html = `
             <div style="padding:11px 15px;font-family:system-ui,-apple-system,sans-serif;min-width:200px;line-height:1.6">
               <div style="font-weight:700;font-size:13px;color:#111;margin-bottom:4px">${p.label}</div>
               <div style="font-size:12px;color:#444;margin-bottom:2px">📍 ${p.geofence}</div>
@@ -124,26 +132,16 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
             </div>`
 
           el.addEventListener('mouseenter', () => {
-            if (popupRef.current) popupRef.current.remove()
-            popupRef.current = new mapboxgl.Popup({
-              closeButton: false,
-              offset: 16,
-              maxWidth: '260px',
-            })
-              .setLngLat([p.lon, p.lat])
-              .setHTML(popupContent)
-              .addTo(map)
+            popupRef.current?.remove()
+            popupRef.current = new mapboxgl.Popup({ closeButton: false, offset: 16, maxWidth: '260px' })
+              .setLngLat([p.lon, p.lat]).setHTML(html).addTo(map)
           })
-
           el.addEventListener('mouseleave', () => {
             popupRef.current?.remove()
             popupRef.current = null
           })
-
-          marker.getElement().dataset.pin = p.key
         })
 
-        // Auto-fit to show all pins when multiple vehicles
         if (pins.length > 1) {
           const bounds = new mapboxgl.LngLatBounds()
           pins.forEach((p) => bounds.extend([p.lon, p.lat]))
@@ -154,10 +152,65 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
 
     return () => {
       destroyed = true
+      mapReadyRef.current = false
+      selectedMarker.current?.remove()
+      selectedMarker.current = null
       mapRef.current?.remove()
       mapRef.current = null
     }
   }, [pins, mapsKey])
+
+  // ── Focus on selected stop ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapReadyRef.current || !mapRef.current) return
+
+    // Remove any previous selected-stop marker
+    selectedMarker.current?.remove()
+    selectedMarker.current = null
+
+    if (!focusCoords) {
+      // No stop selected — fly back to the live (most recent) position
+      if (pins.length === 1) {
+        mapRef.current.flyTo({ center: [pins[0].lon, pins[0].lat], zoom: 17, duration: 900 })
+      } else if (pins.length > 1) {
+        import('mapbox-gl').then((mod) => {
+          if (!mapRef.current) return
+          const bounds = new mod.default.LngLatBounds()
+          pins.forEach((p) => bounds.extend([p.lon, p.lat]))
+          mapRef.current.fitBounds(bounds, { padding: 80, maxZoom: 17, duration: 900 })
+        })
+      }
+      return
+    }
+
+    // Inject pulse keyframe once
+    if (!document.getElementById('mbPulseStyle')) {
+      const s = document.createElement('style')
+      s.id = 'mbPulseStyle'
+      s.textContent = '@keyframes mbPulse{0%{transform:scale(1);opacity:.75}100%{transform:scale(2.8);opacity:0}}'
+      document.head.appendChild(s)
+    }
+
+    const color = pins[0]?.color ?? DOT_COLORS[0]
+
+    const wrapper = document.createElement('div')
+    wrapper.style.cssText = 'position:relative;width:26px;height:26px'
+    const ring = document.createElement('div')
+    ring.style.cssText = `position:absolute;inset:-5px;border-radius:50%;border:3px solid ${color};animation:mbPulse 1.6s ease-out infinite`
+    const dot = document.createElement('div')
+    dot.style.cssText = `position:absolute;inset:0;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 12px rgba(0,0,0,.6);z-index:1`
+    wrapper.appendChild(ring)
+    wrapper.appendChild(dot)
+
+    import('mapbox-gl').then((mod) => {
+      if (!mapRef.current) return
+      const marker = new mod.default.Marker({ element: wrapper })
+        .setLngLat([focusCoords.lon, focusCoords.lat])
+        .addTo(mapRef.current)
+      selectedMarker.current = marker
+      mapRef.current.flyTo({ center: [focusCoords.lon, focusCoords.lat], zoom: 18, duration: 900 })
+    })
+  }, [focusCoords, pins])
 
   const hasData = pins.length > 0
 
@@ -174,7 +227,9 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
         <Typography variant="subtitle1" sx={{ fontWeight: 700, flex: 1 }}>Live Positions</Typography>
         <Typography variant="caption" color="text.disabled">
           {hasData
-            ? `${pins.length} vehicle${pins.length !== 1 ? 's' : ''} · satellite view`
+            ? focusCoords
+              ? `📍 ${focusCoords.geofence}${focusCoords.subZone ? ` · ${focusCoords.subZone}` : ''}`
+              : `${pins.length} vehicle${pins.length !== 1 ? 's' : ''} · live`
             : 'No coordinate data'}
         </Typography>
       </Box>
@@ -213,6 +268,11 @@ export default function VehicleMapPanel({ rows, mapsKey }: VehicleMapPanelProps)
               <Typography variant="caption" color="text.secondary">{p.label}</Typography>
             </Box>
           ))}
+          {focusCoords && (
+            <Typography variant="caption" color="text.disabled" sx={{ ml: 'auto' }}>
+              click segment again to reset
+            </Typography>
+          )}
         </Box>
       )}
     </Paper>

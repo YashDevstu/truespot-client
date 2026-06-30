@@ -15,6 +15,7 @@ import { usePanelQuery } from '@/hooks/usePanelQuery'
 import { useProgressiveDatesQuery } from '@/hooks/useProgressiveDatesQuery'
 import { useFilterOptions } from '@/hooks/useFilterOptions'
 import { buildGeofenceColorMap } from '@/utils/geofenceColors'
+import { parsePings, mergeConsecutiveStops } from '@/utils/stops'
 import FilterSidebar from './FilterSidebar'
 import DashboardHeader from './DashboardHeader'
 import KpiCard from './panels/KpiCard'
@@ -204,6 +205,25 @@ export default function LocationHistoryDashboard({
     return buildGeofenceColorMap(geos)
   }, [singleDayRows])
 
+  // When a timeline segment is clicked, resolve its lat/lon from the rows that
+  // fall within that stop's time window. Used to fly the map to that position.
+  const focusCoords = useMemo(() => {
+    if (selectedStopIndex === null || singleDayRows.length === 0) return null
+    const stops = mergeConsecutiveStops(parsePings(singleDayRows))
+    const stop = stops[selectedStopIndex]
+    if (!stop) return null
+    for (const row of singleDayRows) {
+      const t = new Date(String(row['[StartTime]'] ?? '')).getTime()
+      if (isNaN(t) || t < stop.startMs || t > stop.endMs) continue
+      const lat = parseFloat(String(row['[Latitude]']  ?? ''))
+      const lon = parseFloat(String(row['[Longitude]'] ?? ''))
+      if (isFinite(lat) && isFinite(lon) && !(lat === 0 && lon === 0)) {
+        return { lat, lon, geofence: stop.geofence, subZone: stop.subGeoZone }
+      }
+    }
+    return null
+  }, [selectedStopIndex, singleDayRows])
+
   // Caption text for AssetStatCards
   const datePeriod = isAllDates
     ? 'last 8 days'
@@ -377,7 +397,7 @@ export default function LocationHistoryDashboard({
               )}
 
               {/* Vehicle position map */}
-              <VehicleMapPanel rows={singleDayRows} mapsKey={mapsKey} />
+              <VehicleMapPanel rows={singleDayRows} mapsKey={mapsKey} focusCoords={focusCoords} />
 
               {/* Journey timeline */}
               {timelineTooLarge ? (
